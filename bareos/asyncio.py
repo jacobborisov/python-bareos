@@ -13,20 +13,23 @@ from .bsock import Password
 from .bsock.protocolmessages import ProtocolMessages
 from .bsock.constants import Constants
 
+from   pprint import pformat, pprint
+import json
+
 class AsyncConsole(DirectorConsole):
     def __init__(self):
         super(DirectorConsole, self).__init__()
         self.read_stream = None
         self.write_stream = None
         
-    @staticmethod
+    @classmethod
     @asyncio.coroutine
-    def get_connection(address="localhost",
+    def get_connection(cls, address="localhost",
                  port=9101,
                  dirname=None,
                  name="*UserAgent*",
                  password=None):
-        con = AsyncConsole()
+        con = cls()
         yield from con.connect(address, port, dirname, ConnectionType.DIRECTOR)
         yield from con.auth(name=name, password=password, auth_success_regex=b'^1000 OK.*$')
         yield from con._init_connection()
@@ -301,3 +304,59 @@ class AsyncConsole(DirectorConsole):
         else:
             self.logger.error("failed: " + str(received))
         return (ssl, compatible, result)
+    
+class AsyncConsoleJson(AsyncConsole):
+    """
+    use to send and receive the response from director
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(AsyncConsoleJson, self).__init__(*args, **kwargs)
+
+    @asyncio.coroutine
+    def _init_connection(self):
+        # older version did not support compact mode,
+        # therfore first set api mode to json (which should always work in bareos >= 15.2.0)
+        # and then set api mode json compact (which should work with bareos >= 15.2.2)
+        self.logger.debug((yield from self.call(".api json")))
+        self.logger.debug((yield from self.call(".api json compact=yes")))
+        
+    @classmethod
+    @asyncio.coroutine
+    def get_connection(cls, *args, **kwargs):
+        return (yield from super(AsyncConsoleJson, cls).get_connection(*args, **kwargs))
+
+    @asyncio.coroutine
+    def call(self, command):
+        json = yield from self.call_fullresult(command)
+        if json == None:
+            return
+        if 'result' in json:
+            result = json['result']
+        else:
+            # TODO: or raise an exception?
+            result = json
+        return result
+
+    @asyncio.coroutine
+    def call_fullresult(self, command):
+        resultstring = yield from super(AsyncConsoleJson, self).call(command)
+        data = None
+        if resultstring:
+            try:
+                data = json.loads(resultstring.decode('utf-8'))
+            except ValueError as e:
+                # in case result is not valid json,
+                # create a JSON-RPC wrapper
+                data = {
+                    'error': {
+                        'code': 2,
+                        'message': str(e),
+                        'data': resultstring
+                    },
+                }
+        return data
+
+
+    def _show_result(self, msg):
+        pprint(msg)
