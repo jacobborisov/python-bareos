@@ -12,6 +12,7 @@ from .bsock.connectiontype import ConnectionType
 from .bsock import Password
 from .bsock.protocolmessages import ProtocolMessages
 from .bsock.constants import Constants
+from .exceptions import *
 
 from   pprint import pformat, pprint
 import json
@@ -45,6 +46,17 @@ class AsyncConsole(DirectorConsole):
             self.dirname = address
         self.connection_type = type
         yield from self.__connect()
+        
+    @asyncio.coroutine
+    def disconnect(self):
+        yield from self.send(bytearray("quit", 'utf-8'))
+        header = yield from self.read_stream.readexactly(4)
+        result = self._LowLevel__get_header_data(header)
+        if result == -16:
+            return True
+        else:
+            #TODO: maybe raise exception?
+            pass
         
     @asyncio.coroutine
     def __connect(self):
