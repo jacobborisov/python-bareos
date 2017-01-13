@@ -137,7 +137,10 @@ class AsyncConsole(DirectorConsole):
         
         self.write_stream.write(struct.pack("!i", msg_len) + msg)
         self.logger.debug("%s" %(msg))
+        #try:
         yield from self.write_stream.drain()
+        #except ConnectionError as e:
+        #    print(e)
         
         # self.__check_socket_connection()
         # msg_len = len(msg) # plus the msglen info
@@ -152,7 +155,12 @@ class AsyncConsole(DirectorConsole):
     @asyncio.coroutine
     def __get_header(self):
         #self.__check_socket_connection()
-        header = yield from self.read_stream.readexactly(4)
+        try:
+            header = yield from self.read_stream.readexactly(4)
+        except asyncio.streams.IncompleteReadError as e:
+            #TODO
+            print('ERROR', e)
+            return
         if len(header) == 0:
             self.logger.debug("received empty header, assuming connection is closed")
             raise SocketEmptyHeader()
