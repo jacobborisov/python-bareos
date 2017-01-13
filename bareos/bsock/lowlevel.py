@@ -20,13 +20,69 @@ import socket
 import struct
 import sys
 import time
+import inspect
+import types
+import functools
+import asyncio.futures
+from asyncio import coroutine
+import asyncio
+
+def coroutine_(func):
+    """Decorator to mark coroutines.
+    If the coroutine is not yielded from before it is destroyed,
+    an error message is logged.
+    """
+    _types_coroutine = None
+
+    if inspect.isgeneratorfunction(func):
+        coro = func
+    else:
+        @functools.wraps(func)
+        def coro(*args, **kw):
+            res = func(*args, **kw)
+            if (inspect.isgenerator(res) or
+                isinstance(res, CoroWrapper)):
+                res = yield from res
+            elif _AwaitableABC is not None:
+                # If 'func' returns an Awaitable (new in 3.5) we
+                # want to run it.
+                try:
+                    await_meth = res.__await__
+                except AttributeError:
+                    pass
+                else:
+                    if isinstance(res, _AwaitableABC):
+                        res = yield from await_meth()
+            return res
+
+    #if not _DEBUG:
+    if _types_coroutine is None:
+        wrapper = coro
+    else:
+        wrapper = _types_coroutine(coro)
+    # else:
+    #     @functools.wraps(func)
+    #     def wrapper(*args, **kwds):
+    #         w = CoroWrapper(coro(*args, **kwds), func=func)
+    #         if w._source_traceback:
+    #             del w._source_traceback[-1]
+    #         # Python < 3.5 does not implement __qualname__
+    #         # on generator objects, so we set it manually.
+    #         # We use getattr as some callables (such as
+    #         # functools.partial may lack __qualname__).
+    #         w.__name__ = getattr(func, '__name__', None)
+    #         w.__qualname__ = getattr(func, '__qualname__', None)
+    #         return w
+    return wrapper
 
 class LowLevel(object):
     """
     Low Level socket methods to communicate with the bareos-director.
     """
+    
+    _attrs = ['connect', '_LowLevel__connect', '_init_connection', 'auth', '_LowLevel__auth', 'disconnect', 'reconnect', 'call', '_LowLevel__call', 'call_fullresult',  'send', 'recv', 'recv_msg', 'recv_submsg', '_LowLevel__get_header', '_cram_md5_challenge', '_cram_md5_respond']
 
-    def __init__(self):
+    def __init__(self, asyncio=False):
         self.logger = logging.getLogger()
         self.logger.debug("init")
         self.status = None
@@ -34,7 +90,16 @@ class LowLevel(object):
         self.password = None
         self.port = None
         self.dirname = None
-        self.socket = None
+        if asyncio:
+            self.asyncio = True
+            self.read_stream = None
+            self.write_stream = None
+            self.established = False
+            for attr in self._attrs:
+                setattr(self, attr, coroutine_(getattr(self, attr)))
+        else:
+            self.asyncio = False
+            self.socket = None
         self.auth_credentials_valid = False
         self.connection_type = None
         self.receive_buffer = b''
@@ -47,12 +112,17 @@ class LowLevel(object):
         else:
             self.dirname = address
         self.connection_type = type
-        return self.__connect()
-
+        if self.asyncio:
+            return (yield from self.__connect())
+        else:
+            return self.__connect()
 
     def __connect(self):
         try:
-            self.socket = socket.create_connection((self.address, self.port))
+            if self.asyncio:
+                self.read_stream, self.write_stream = yield from asyncio.open_connection(host=self.address, port=self.port)
+            else:
+                self.socket = socket.create_connection((self.address, self.port))
         except socket.gaierror as e:
             self._handleSocketError(e)
             raise ConnectionError(
@@ -60,7 +130,6 @@ class LowLevel(object):
         else:
             self.logger.debug("connected to " + str(self.address) + ":" + str(self.port))
         return True
-
 
     def auth(self, name, password, auth_success_regex):
         '''
@@ -76,31 +145,46 @@ class LowLevel(object):
         self.auth_success_regex = auth_success_regex
         return self.__auth()
 
-
     def __auth(self):
         bashed_name = ProtocolMessages.hello(self.name, type=self.connection_type)
         # send the bash to the director
-        self.send(bashed_name)
-
-        (ssl, result_compatible, result) = self._cram_md5_respond(password=self.password.md5(), tls_remote_need=0)
+        if self.asyncio:
+            yield from self.send(bashed_name)
+            (ssl, result_compatible, result) = (yield from self._cram_md5_respond(password=self.password.md5(), tls_remote_need=0))
+        else:
+            self.send(bashed_name)
+            (ssl, result_compatible, result) = self._cram_md5_respond(password=self.password.md5(), tls_remote_need=0)
         if not result:
             raise AuthenticationError("failed (in response)")
-        if not self._cram_md5_challenge(clientname=self.name, password=self.password.md5(), tls_local_need=0, compatible=True):
+        if self.asyncio:
+            challenge = yield from self._cram_md5_challenge(clientname=self.name, password=self.password.md5(), tls_local_need=0, compatible=True)
+        else:
+            challenge = self._cram_md5_challenge(clientname=self.name, password=self.password.md5(), tls_local_need=0, compatible=True)
+        if not challenge:
             raise AuthenticationError("failed (in challenge)")
-        self.recv_msg(self.auth_success_regex)
+        
+        if self.asyncio:
+            yield from self.recv_msg(self.auth_success_regex)
+        else: self.recv_msg(self.auth_success_regex)
         self.auth_credentials_valid = True
         return True
-
 
     def _init_connection(self):
         pass
 
-
     def disconnect(self):
         ''' disconnect '''
-        # TODO
-        pass
-
+        if self.asyncio:
+            yield from self.send(bytearray("quit", 'utf-8'))
+            header = yield from self.read_stream.readexactly(4)
+            result = self._LowLevel__get_header_data(header)
+            if result == -16:
+                return True
+            else:
+                #TODO: maybe raise exception?
+                pass
+        else:
+            pass
 
     def reconnect(self):
         result = False
@@ -112,15 +196,19 @@ class LowLevel(object):
                 self.logger.warning("failed to reconnect")
         return result
 
-
     def call(self, command):
         '''
         call a bareos-director user agent command
         '''
+        if self.asyncio and not self.established:
+            self.established = True
+            yield from self.establish()
         if isinstance(command, list):
             command = " ".join(command)
-        return self.__call(command, 0)
-
+        if self.asyncio:
+            return (yield from self.__call(command, 0))
+        else:
+            return self.__call(command, 0)
 
     def __call(self, command, count):
         '''
@@ -129,8 +217,12 @@ class LowLevel(object):
         '''
         result = b''
         try:
-            self.send(bytearray(command, 'utf-8'))
-            result = self.recv_msg()
+            if self.asyncio:
+                yield from self.send(bytearray(command, 'utf-8'))
+                result = yield from self.recv_msg()
+            else:
+                self.send(bytearray(command, 'utf-8'))
+                result = self.recv_msg()
         except (SocketEmptyHeader, ConnectionLostError) as e:
             self.logger.error("connection problem (%s): %s" % (type(e).__name__, str(e)))
             if count == 0:
@@ -138,10 +230,8 @@ class LowLevel(object):
                     return self.__call(command, count+1)
         return result
 
-
     def send_command(self, commamd):
         return self.call(command)
-
 
     def send(self, msg=None):
         '''use socket to send request to director'''
@@ -150,24 +240,32 @@ class LowLevel(object):
 
         try:
             # convert to network flow
-            self.socket.sendall(struct.pack("!i", msg_len) + msg)
+            if self.asyncio:
+                self.write_stream.write(struct.pack("!i", msg_len) + msg)
+                yield from self.write_stream.drain()
+            else:
+                self.socket.sendall(struct.pack("!i", msg_len) + msg)
             self.logger.debug("%s" %(msg))
         except socket.error as e:
             self._handleSocketError(e)
-
 
     def recv(self):
         '''will receive data from director '''
         self.__check_socket_connection()
         # get the message header
-        header = self.__get_header()
+        if self.asyncio:
+            header = yield from self.__get_header()
+        else:
+            header = self.__get_header()
         if header <= 0:
             self.logger.debug("header: " + str(header))
         # get the message
         length = header
-        msg = self.recv_submsg(length)
+        if self.asyncio:
+            msg = yield from self.recv_submsg(length)
+        else:
+            msg = self.recv_submsg(length)
         return msg
-
 
     def recv_msg(self, regex = b'^\d\d\d\d OK.*$', timeout = None):
         '''will receive data from director '''
@@ -176,9 +274,13 @@ class LowLevel(object):
             timeouts = 0
             while True:
                 # get the message header
-                self.socket.settimeout(0.1)
+                if not self.asyncio:
+                    self.socket.settimeout(0.1)
                 try:
-                    header = self.__get_header()
+                    if self.asyncio:
+                        header = yield from self.__get_header()
+                    else:
+                        header = self.__get_header()
                 except socket.timeout:
                     # only log every 100 timeouts
                     if timeouts % 100 == 0:
@@ -195,7 +297,10 @@ class LowLevel(object):
                     else:
                         # header is the length of the next message
                         length = header
-                        self.receive_buffer += self.recv_submsg(length)
+                        if self.asyncio:
+                            self.receive_buffer += yield from self.recv_submsg(length)
+                        else:
+                            self.receive_buffer += self.recv_submsg(length)
                         # Bareos indicates end of command result by line starting with 4 digits
                         match = re.search(regex, self.receive_buffer, re.MULTILINE)
                         if match:
@@ -209,25 +314,26 @@ class LowLevel(object):
             self._handleSocketError(e)
         return msg
 
-
     def recv_submsg(self, length):
         # get the message
         msg = b''
-        while length > 0:
-            self.logger.debug("  submsg len: " + str(length))
-            # TODO
-            self.socket.settimeout(10)
-            submsg = self.socket.recv(length)
-            length -= len(submsg)
-            #self.logger.debug(submsg)
-            msg += submsg
+        if self.asyncio:
+            msg = yield from self.read_stream.readexactly(length)
+        else:
+            while length > 0:
+                self.logger.debug("  submsg len: " + str(length))
+                # TODO
+                self.socket.settimeout(10)
+                submsg = self.socket.recv(length)
+                length -= len(submsg)
+                #self.logger.debug(submsg)
+                msg += submsg
         if (type(msg) is str):
             msg = bytearray(msg.decode('utf-8'), 'utf-8')
         if (type(msg) is bytes):
             msg = bytearray(msg)
         #self.logger.debug(str(msg))
         return msg
-
 
     def interactive(self):
         """
@@ -241,7 +347,6 @@ class LowLevel(object):
             self._show_result(resultmsg)
         return True
 
-
     def _get_input(self):
         # Python2: raw_input, Python3: input
         try:
@@ -251,7 +356,6 @@ class LowLevel(object):
         data = myinput(">>")
         return data
 
-
     def _show_result(self, msg):
         #print(msg.decode('utf-8'))
         sys.stdout.write(msg.decode('utf-8'))
@@ -259,16 +363,17 @@ class LowLevel(object):
         if msg[-2] != ord(b'\n'):
             sys.stdout.write(b'\n')
 
-
     def __get_header(self):
         self.__check_socket_connection()
-        header = self.socket.recv(4)
+        if self.asyncio:
+            header = yield from self.read_stream.readexactly(4)
+        else:
+            header = self.socket.recv(4)
         if len(header) == 0:
             self.logger.debug("received empty header, assuming connection is closed")
             raise SocketEmptyHeader()
         else:
             return self.__get_header_data(header)
-
 
     def __get_header_data(self, header):
         # struct.unpack:
@@ -280,10 +385,10 @@ class LowLevel(object):
 
     def is_end_of_message(self, data):
         return ((not self.is_connected()) or
-                data == Constants.BNET_EOD or
-                data == Constants.BNET_TERMINATE or
-                data == Constants.BNET_MAIN_PROMPT or
-                data == Constants.BNET_SUB_PROMPT)
+                data in (Constants.BNET_EOD,
+                         Constants.BNET_TERMINATE,
+                         Constants.BNET_MAIN_PROMPT,
+                         Constants.BNET_SUB_PROMPT))
 
 
     def is_connected(self):
@@ -303,10 +408,13 @@ class LowLevel(object):
         #chal = "<%u.%u@%s>" %(rand, int(time.time()), self.dirname)
         chal = '<%u.%u@%s>' %(rand, int(time.time()), clientname)
         msg = bytearray('auth cram-md5 %s ssl=%d\n' %(chal, tls_local_need), 'utf-8')
-        # send the confirmation
-        self.send(msg)
-        # get the response
-        msg = self.recv()
+        # send the confirmation and get the response
+        if self.asyncio:
+            yield from self.send(msg)
+            msg = yield from self.recv()
+        else:
+            self.send(msg)
+            msg = self.recv()
         if msg[-1] == 0:
             del msg[-1]
         self.logger.debug("received: " + str(msg))
@@ -322,14 +430,19 @@ class LowLevel(object):
         is_correct = ((msg == bbase64compatible) or (msg == bbase64notcompatible))
         # check against compatible base64 and Bareos specific base64
         if is_correct:
-            self.send(ProtocolMessages.auth_ok())
+            if self.asyncio:
+                yield from self.send(ProtocolMessages.auth_ok())
+            else:
+                self.send(ProtocolMessages.auth_ok())
         else:
             self.logger.error("expected result: %s or %s, but get %s" %(bbase64compatible, bbase64notcompatible, msg))
-            self.send(ProtocolMessages.auth_failed())
+            if self.asyncio:
+                yield from self.send(ProtocolMessages.auth_failed())
+            else:
+                self.send(ProtocolMessages.auth_failed())
 
         # check the response is equal to base64
         return is_correct
-
 
     def _cram_md5_respond(self, password, tls_remote_need=0, compatible=True):
         '''
@@ -342,7 +455,10 @@ class LowLevel(object):
         result = False
         msg = ""
         try:
-            msg = self.recv()
+            if self.asyncio:
+                msg = yield from self.recv()
+            else:
+                msg = self.recv()
         except RuntimeError:
             self.logger.error("RuntimeError exception in recv")
             return (0, True, False)
@@ -368,14 +484,18 @@ class LowLevel(object):
         msg = BareosBase64().string_to_base64(bytearray(hmac_md5.digest()))
 
         # send the base64 encoding to director
-        self.send(msg)
-        received = self.recv()
+        if self.asyncio:
+            yield from self.send(msg)
+            received = yield from self.recv()
+        else:
+            self.send(msg)
+            received = self.recv()
+        
         if  ProtocolMessages.is_auth_ok(received):
             result = True
         else:
             self.logger.error("failed: " + str(received))
         return (ssl, compatible, result)
-
 
     def __set_status(self, status):
         self.status = status
@@ -401,6 +521,8 @@ class LowLevel(object):
 
     def __check_socket_connection(self):
         result = True
+        if self.asyncio:
+            return True
         if self.socket == None:
             result = False
             if self.auth_credentials_valid:

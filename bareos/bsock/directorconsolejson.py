@@ -18,12 +18,18 @@ class DirectorConsoleJson(DirectorConsole):
         # older version did not support compact mode,
         # therfore first set api mode to json (which should always work in bareos >= 15.2.0)
         # and then set api mode json compact (which should work with bareos >= 15.2.2)
-        self.logger.debug(self.call(".api json"))
-        self.logger.debug(self.call(".api json compact=yes"))
-
+        if self.asyncio:
+            self.logger.debug((yield from self.call(".api json")))
+            self.logger.debug((yield from self.call(".api json compact=yes")))
+        else:
+            self.logger.debug(self.call(".api json"))
+            self.logger.debug(self.call(".api json compact=yes"))
 
     def call(self, command):
-        json = self.call_fullresult(command)
+        if self.asyncio:
+            json = yield from self.call_fullresult(command)
+        else:
+            json = self.call_fullresult(command)
         if json == None:
             return
         if 'result' in json:
@@ -33,9 +39,11 @@ class DirectorConsoleJson(DirectorConsole):
             result = json
         return result
 
-
     def call_fullresult(self, command):
-        resultstring = super(DirectorConsoleJson, self).call(command)
+        if self.asyncio:
+            resultstring = yield from super(DirectorConsoleJson, self).call(command)
+        else:
+            resultstring = super(DirectorConsoleJson, self).call(command)
         data = None
         if resultstring:
             try:
@@ -51,7 +59,6 @@ class DirectorConsoleJson(DirectorConsole):
                     },
                 }
         return data
-
 
     def _show_result(self, msg):
         pprint(msg)
