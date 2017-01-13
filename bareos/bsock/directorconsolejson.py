@@ -24,6 +24,7 @@ class DirectorConsoleJson(DirectorConsole):
         self.logger.debug((yield from call) if self.aio else call)
         self.logger.debug((yield from call_compact) if self.aio else call_compact)
 
+
     #@asyncio_switch
     def call(self, command):
         call = self.call_fullresult(command)    
@@ -36,6 +37,7 @@ class DirectorConsoleJson(DirectorConsole):
             # TODO: or raise an exception?
             result = json
         return result
+
 
     #@asyncio_switch
     def call_fullresult(self, command):
@@ -56,6 +58,7 @@ class DirectorConsoleJson(DirectorConsole):
                     },
                 }
         return data
+
 
     def _show_result(self, msg):
         pprint(msg)

@@ -29,10 +29,12 @@ class DirectorConsole(LowLevel):
             self.auth(name=name, password=password, auth_success_regex=b'^1000 OK.*$')
             self._init_connection()
 
+
     #@asyncio_switch
     def _init_connection(self):
         call = self.call("autodisplay off")
         if self.aio: yield from call
+
 
     def get_to_prompt(self):
         self.send(b".")

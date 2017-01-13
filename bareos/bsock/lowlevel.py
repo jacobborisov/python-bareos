@@ -121,6 +121,7 @@ class LowLevel(object):
         conn = self.__connect()
         return (yield from conn) if self.aio else conn 
 
+
     #@asyncio_switch
     def __connect(self):
         try:
@@ -136,6 +137,7 @@ class LowLevel(object):
             self.logger.debug("connected to " + str(self.address) + ":" + str(self.port))
         return True
 
+
     #@asyncio_switch
     def auth(self, name, password, auth_success_regex):
         '''
@@ -150,6 +152,7 @@ class LowLevel(object):
         self.name = name
         self.auth_success_regex = auth_success_regex
         return self.__auth()
+    
 
     #@asyncio_switch
     def __auth(self):
@@ -157,6 +160,7 @@ class LowLevel(object):
         # send the bash to the director
         send = self.send(bashed_name)
         if self.aio: yield from send
+        
         respond = self._cram_md5_respond(password=self.password.md5(), tls_remote_need=0)
         (ssl, result_compatible, result) = (yield from respond) if self.aio else respond
         if not result:
@@ -170,9 +174,11 @@ class LowLevel(object):
         self.auth_credentials_valid = True
         return True
 
+
     #@asyncio_switch
     def _init_connection(self):
         pass
+
 
     #@asyncio_switch
     def disconnect(self):
@@ -189,6 +195,7 @@ class LowLevel(object):
         else:
             pass
 
+
     def reconnect(self):
         result = False
         if self.auth_credentials_valid:
@@ -198,6 +205,7 @@ class LowLevel(object):
             except socket.error:
                 self.logger.warning("failed to reconnect")
         return result
+
 
     #@asyncio_switch
     def call(self, command):
@@ -231,6 +239,7 @@ class LowLevel(object):
                     return self.__call(command, count+1)
         return result
 
+
     def send_command(self, commamd):
         return self.call(command)
 
@@ -251,6 +260,7 @@ class LowLevel(object):
         except socket.error as e:
             self._handleSocketError(e)
 
+
     #@asyncio_switch
     def recv(self):
         '''will receive data from director '''
@@ -265,6 +275,7 @@ class LowLevel(object):
         recv = self.recv_submsg(length)
         msg = (yield from recv) if self.aio else recv
         return msg
+
 
     #@asyncio_switch
     def recv_msg(self, regex = b'^\d\d\d\d OK.*$', timeout = None):
@@ -310,6 +321,7 @@ class LowLevel(object):
             self._handleSocketError(e)
         return msg
 
+
     #@asyncio_switch
     def recv_submsg(self, length):
         # get the message
@@ -331,6 +343,7 @@ class LowLevel(object):
             msg = bytearray(msg)
         #self.logger.debug(str(msg))
         return msg
+    
 
     def interactive(self):
         """
@@ -344,6 +357,7 @@ class LowLevel(object):
             self._show_result(resultmsg)
         return True
 
+
     def _get_input(self):
         # Python2: raw_input, Python3: input
         try:
@@ -352,6 +366,7 @@ class LowLevel(object):
             myinput = input
         data = myinput(">>")
         return data
+    
 
     def _show_result(self, msg):
         #print(msg.decode('utf-8'))
@@ -359,6 +374,7 @@ class LowLevel(object):
         # add a linefeed, if there isn't one already
         if msg[-2] != ord(b'\n'):
             sys.stdout.write(b'\n')
+
 
     #@asyncio_switch
     def __get_header(self):
@@ -372,6 +388,7 @@ class LowLevel(object):
             raise SocketEmptyHeader()
         else:
             return self.__get_header_data(header)
+
 
     def __get_header_data(self, header):
         # struct.unpack:
@@ -391,6 +408,7 @@ class LowLevel(object):
 
     def is_connected(self):
         return (self.status != Constants.BNET_TERMINATE)
+
 
     #@asyncio_switch
     def _cram_md5_challenge(self, clientname, password, tls_local_need=0, compatible=True):
@@ -435,6 +453,7 @@ class LowLevel(object):
 
         # check the response is equal to base64
         return is_correct
+    
 
     #@asyncio_switch
     def _cram_md5_respond(self, password, tls_remote_need=0, compatible=True):
@@ -484,6 +503,7 @@ class LowLevel(object):
         else:
             self.logger.error("failed: " + str(received))
         return (ssl, compatible, result)
+
 
     def __set_status(self, status):
         self.status = status
