@@ -32,7 +32,7 @@ class DirectorConsole(LowLevel):
     #@asyncio_switch
     def _init_connection(self):
         call = self.call("autodisplay off")
-        if self.async: yield from call
+        if self.aio: yield from call
 
     def get_to_prompt(self):
         self.send(b".")

@@ -223,7 +223,7 @@ class LowLevel(object):
             send = self.send(bytearray(command, 'utf-8'))
             if self.aio: yield from send
             recv = self.recv_msg()
-            result = (yield from self.recv_msg()) if self.aio else recv
+            result = (yield from recv) if self.aio else recv
         except (SocketEmptyHeader, ConnectionLostError) as e:
             self.logger.error("connection problem (%s): %s" % (type(e).__name__, str(e)))
             if count == 0:
@@ -410,7 +410,7 @@ class LowLevel(object):
         send = self.send(msg)
         if self.aio: yield from send
         recv = self.recv()
-        msg = (yield from self.recv()) if self.aio else recv
+        msg = (yield from recv) if self.aio else recv
         if msg[-1] == 0:
             del msg[-1]
         self.logger.debug("received: " + str(msg))

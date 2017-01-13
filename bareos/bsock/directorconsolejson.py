@@ -22,7 +22,7 @@ class DirectorConsoleJson(DirectorConsole):
         call = self.call(".api json")
         call_compact = self.call(".api json compact=yes")
         self.logger.debug((yield from call) if self.aio else call)
-        self.logger.debug((yield from call_compact) if self.aio else call)
+        self.logger.debug((yield from call_compact) if self.aio else call_compact)
 
     #@asyncio_switch
     def call(self, command):
