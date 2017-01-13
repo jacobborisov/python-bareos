@@ -14,22 +14,20 @@ class DirectorConsoleJson(DirectorConsole):
     def __init__(self, *args, **kwargs):
         super(DirectorConsoleJson, self).__init__(*args, **kwargs)
 
+    #@asyncio_switch
     def _init_connection(self):
         # older version did not support compact mode,
         # therfore first set api mode to json (which should always work in bareos >= 15.2.0)
         # and then set api mode json compact (which should work with bareos >= 15.2.2)
-        if self.asyncio:
-            self.logger.debug((yield from self.call(".api json")))
-            self.logger.debug((yield from self.call(".api json compact=yes")))
-        else:
-            self.logger.debug(self.call(".api json"))
-            self.logger.debug(self.call(".api json compact=yes"))
+        call = self.call(".api json")
+        call_compact = self.call(".api json compact=yes")
+        self.logger.debug((yield from call) if self.aio else call)
+        self.logger.debug((yield from call_compact) if self.aio else call)
 
+    #@asyncio_switch
     def call(self, command):
-        if self.asyncio:
-            json = yield from self.call_fullresult(command)
-        else:
-            json = self.call_fullresult(command)
+        call = self.call_fullresult(command)    
+        json = (yield from call) if self.aio else call
         if json == None:
             return
         if 'result' in json:
@@ -39,11 +37,10 @@ class DirectorConsoleJson(DirectorConsole):
             result = json
         return result
 
+    #@asyncio_switch
     def call_fullresult(self, command):
-        if self.asyncio:
-            resultstring = yield from super(DirectorConsoleJson, self).call(command)
-        else:
-            resultstring = super(DirectorConsoleJson, self).call(command)
+        call = super(DirectorConsoleJson, self).call(command)
+        resultstring = (yield from call) if self.aio else call
         data = None
         if resultstring:
             try:
