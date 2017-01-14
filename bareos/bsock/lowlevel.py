@@ -24,60 +24,25 @@ import inspect
 import types
 import functools
 import asyncio.futures
+import asyncio.coroutines
 from asyncio import coroutine
 import asyncio
 
-def coroutine_(func):
-    """Decorator to mark coroutines.
-    If the coroutine is not yielded from before it is destroyed,
-    an error message is logged.
-    """
-    _types_coroutine = None
-
-    if inspect.isgeneratorfunction(func):
-        coro = func
-    else:
-        @functools.wraps(func)
-        def coro(*args, **kw):
-            res = func(*args, **kw)
-            if (inspect.isgenerator(res) or
-                isinstance(res, CoroWrapper)):
-                res = yield from res
-            elif _AwaitableABC is not None:
-                # If 'func' returns an Awaitable (new in 3.5) we
-                # want to run it.
-                try:
-                    await_meth = res.__await__
-                except AttributeError:
-                    pass
+def asyncio_switch(fn):
+    def wrapper(slf, *args, **kwargs):
+        if slf.aio:
+            fnc = coroutine(fn)
+            return fnc(slf, *args, **kwargs)
+        else:
+            try:
+                res = fn(slf, *args, **kwargs)
+                if isinstance(res, types.GeneratorType):
+                    res.__next__()
                 else:
-                    if isinstance(res, _AwaitableABC):
-                        res = yield from await_meth()
-            return res
-
-    #if not _DEBUG:
-    if _types_coroutine is None:
-        wrapper = coro
-    else:
-        wrapper = _types_coroutine(coro)
-    # else:
-    #     @functools.wraps(func)
-    #     def wrapper(*args, **kwds):
-    #         w = CoroWrapper(coro(*args, **kwds), func=func)
-    #         if w._source_traceback:
-    #             del w._source_traceback[-1]
-    #         # Python < 3.5 does not implement __qualname__
-    #         # on generator objects, so we set it manually.
-    #         # We use getattr as some callables (such as
-    #         # functools.partial may lack __qualname__).
-    #         w.__name__ = getattr(func, '__name__', None)
-    #         w.__qualname__ = getattr(func, '__qualname__', None)
-    #         return w
+                    return res
+            except StopIteration as e:
+                return e.value
     return wrapper
-
-# def asyncio_switch(fn):
-#     fn.asyncio_switch = True
-#     return fn
 
 class LowLevel(object):
     """
@@ -97,11 +62,6 @@ class LowLevel(object):
             self.read_stream = None
             self.write_stream = None
             self.established = False
-            # for attr_name in dir(self):
-            #     attr = getattr(self, attr_name)
-            #     if not hasattr(attr, 'asyncio_switch'):
-            #         continue
-            #     #setattr(self, attr_name, coroutine_(attr))
         else:
             self.aio = False
             self.socket = None
@@ -109,7 +69,7 @@ class LowLevel(object):
         self.connection_type = None
         self.receive_buffer = b''
 
-    #@asyncio_switch
+    @asyncio_switch
     def connect(self, address, port, dirname, type):
         self.address = address
         self.port = port
@@ -122,7 +82,7 @@ class LowLevel(object):
         return (yield from conn) if self.aio else conn 
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def __connect(self):
         try:
             if self.aio:
@@ -138,7 +98,7 @@ class LowLevel(object):
         return True
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def auth(self, name, password, auth_success_regex):
         '''
         login to the bareos-director
@@ -152,9 +112,9 @@ class LowLevel(object):
         self.name = name
         self.auth_success_regex = auth_success_regex
         return self.__auth()
-    
 
-    #@asyncio_switch
+
+    @asyncio_switch
     def __auth(self):
         bashed_name = ProtocolMessages.hello(self.name, type=self.connection_type)
         # send the bash to the director
@@ -175,12 +135,12 @@ class LowLevel(object):
         return True
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def _init_connection(self):
         pass
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def disconnect(self):
         ''' disconnect '''
         if self.aio:
@@ -207,7 +167,7 @@ class LowLevel(object):
         return result
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def call(self, command):
         '''
         call a bareos-director user agent command
@@ -220,7 +180,8 @@ class LowLevel(object):
         call = self.__call(command, 0)
         return (yield from call) if self.aio else call
 
-    #@asyncio_switch
+
+    @asyncio_switch
     def __call(self, command, count):
         '''
         Send a command and receive the result.
@@ -243,7 +204,8 @@ class LowLevel(object):
     def send_command(self, commamd):
         return self.call(command)
 
-    #@asyncio_switch
+
+    @asyncio_switch
     def send(self, msg=None):
         '''use socket to send request to director'''
         self.__check_socket_connection()
@@ -261,7 +223,7 @@ class LowLevel(object):
             self._handleSocketError(e)
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def recv(self):
         '''will receive data from director '''
         self.__check_socket_connection()
@@ -277,7 +239,7 @@ class LowLevel(object):
         return msg
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def recv_msg(self, regex = b'^\d\d\d\d OK.*$', timeout = None):
         '''will receive data from director '''
         self.__check_socket_connection()
@@ -322,7 +284,7 @@ class LowLevel(object):
         return msg
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def recv_submsg(self, length):
         # get the message
         msg = b''
@@ -343,7 +305,7 @@ class LowLevel(object):
             msg = bytearray(msg)
         #self.logger.debug(str(msg))
         return msg
-    
+
 
     def interactive(self):
         """
@@ -366,7 +328,7 @@ class LowLevel(object):
             myinput = input
         data = myinput(">>")
         return data
-    
+
 
     def _show_result(self, msg):
         #print(msg.decode('utf-8'))
@@ -376,7 +338,7 @@ class LowLevel(object):
             sys.stdout.write(b'\n')
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def __get_header(self):
         self.__check_socket_connection()
         if self.aio:
@@ -410,7 +372,7 @@ class LowLevel(object):
         return (self.status != Constants.BNET_TERMINATE)
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def _cram_md5_challenge(self, clientname, password, tls_local_need=0, compatible=True):
         '''
         client launch the challenge,
@@ -453,9 +415,9 @@ class LowLevel(object):
 
         # check the response is equal to base64
         return is_correct
-    
 
-    #@asyncio_switch
+
+    @asyncio_switch
     def _cram_md5_respond(self, password, tls_remote_need=0, compatible=True):
         '''
         client connect to dir,

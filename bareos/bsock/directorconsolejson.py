@@ -2,7 +2,7 @@
 Reimplementation of the bconsole program in python.
 """
 
-from   bareos.bsock.directorconsole import DirectorConsole
+from   bareos.bsock.directorconsole import DirectorConsole, asyncio_switch
 from   pprint import pformat, pprint
 import json
 
@@ -14,7 +14,7 @@ class DirectorConsoleJson(DirectorConsole):
     def __init__(self, *args, **kwargs):
         super(DirectorConsoleJson, self).__init__(*args, **kwargs)
 
-    #@asyncio_switch
+    @asyncio_switch
     def _init_connection(self):
         # older version did not support compact mode,
         # therfore first set api mode to json (which should always work in bareos >= 15.2.0)
@@ -25,9 +25,9 @@ class DirectorConsoleJson(DirectorConsole):
         self.logger.debug((yield from call_compact) if self.aio else call_compact)
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def call(self, command):
-        call = self.call_fullresult(command)    
+        call = self.call_fullresult(command)
         json = (yield from call) if self.aio else call
         if json == None:
             return
@@ -39,7 +39,7 @@ class DirectorConsoleJson(DirectorConsole):
         return result
 
 
-    #@asyncio_switch
+    @asyncio_switch
     def call_fullresult(self, command):
         call = super(DirectorConsoleJson, self).call(command)
         resultstring = (yield from call) if self.aio else call
