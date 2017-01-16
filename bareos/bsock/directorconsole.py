@@ -3,8 +3,7 @@ Communicates with the bareos-dir console
 """
 
 from   bareos.bsock.connectiontype  import ConnectionType
-from   bareos.bsock.lowlevel import LowLevel, asyncio_switch
-
+from   bareos.bsock.lowlevel import LowLevel, coroutine_if
 from asyncio import coroutine
 
 class DirectorConsole(LowLevel):
@@ -30,10 +29,10 @@ class DirectorConsole(LowLevel):
             self._init_connection()
 
 
-    @asyncio_switch
+    @coroutine_if('aio')
     def _init_connection(self):
-        call = self.call("autodisplay off")
-        if self.aio: yield from call
+        _ = self.call("autodisplay off")
+        if self.aio: yield from _
 
 
     def get_to_prompt(self):

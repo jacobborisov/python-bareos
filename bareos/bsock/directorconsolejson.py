@@ -2,7 +2,7 @@
 Reimplementation of the bconsole program in python.
 """
 
-from   bareos.bsock.directorconsole import DirectorConsole, asyncio_switch
+from   bareos.bsock.directorconsole import DirectorConsole, coroutine_if
 from   pprint import pformat, pprint
 import json
 
@@ -14,21 +14,23 @@ class DirectorConsoleJson(DirectorConsole):
     def __init__(self, *args, **kwargs):
         super(DirectorConsoleJson, self).__init__(*args, **kwargs)
 
-    @asyncio_switch
+    @coroutine_if('aio')
     def _init_connection(self):
         # older version did not support compact mode,
         # therfore first set api mode to json (which should always work in bareos >= 15.2.0)
         # and then set api mode json compact (which should work with bareos >= 15.2.2)
-        call = self.call(".api json")
-        call_compact = self.call(".api json compact=yes")
-        self.logger.debug((yield from call) if self.aio else call)
-        self.logger.debug((yield from call_compact) if self.aio else call_compact)
+        _ = self.call(".api json")
+        if self.aio: _ = yield from _
+        self.logger.debug(_)
+        _ = self.call(".api json compact=yes")
+        if self.aio: _ = yield from _
+        self.logger.debug(_)
 
 
-    @asyncio_switch
+    @coroutine_if('aio')
     def call(self, command):
-        call = self.call_fullresult(command)
-        json = (yield from call) if self.aio else call
+        json = self.call_fullresult(command)
+        if self.aio: json = yield from json
         if json == None:
             return
         if 'result' in json:
@@ -39,10 +41,10 @@ class DirectorConsoleJson(DirectorConsole):
         return result
 
 
-    @asyncio_switch
+    @coroutine_if('aio')
     def call_fullresult(self, command):
-        call = super(DirectorConsoleJson, self).call(command)
-        resultstring = (yield from call) if self.aio else call
+        resultstring = super(DirectorConsoleJson, self).call(command)
+        if self.aio: resultstring = yield from resultstring
         data = None
         if resultstring:
             try:
